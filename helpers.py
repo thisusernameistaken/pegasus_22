@@ -58,5 +58,4 @@ class lestring_renderer(DataRenderer):
             prefix.append(InstructionTextToken(InstructionTextTokenType.StringToken,"\""))
             prefix.append(InstructionTextToken(InstructionTextTokenType.StringToken,string))
             prefix.append(InstructionTextToken(InstructionTextTokenType.StringToken,"\""))
-        print("DID I HIT")
         return [DisassemblyTextLine(prefix, addr)]        

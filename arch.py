@@ -9,6 +9,7 @@ from binaryninja.enums import (
     FlagRole,
     Endianness
 )
+from .disassembly import EARdisassembler
 
 class EAR(Architecture):
     name = "ear"
@@ -19,10 +20,10 @@ class EAR(Architecture):
 
     endianness = Endianness.LittleEndian
     stack_pointer = "SP"
-    
+
     regs = {
         'R0' : RegisterInfo("R0",2),
-        'R1' : RegisterInfo("R1",2),
+        'R1' : RegisterInfo("R0",2),
         'R2' : RegisterInfo("R2",2),
         'R3' : RegisterInfo("R3",2),
         'R4' : RegisterInfo("R4",2),
@@ -51,9 +52,12 @@ class EAR(Architecture):
 
     def __init__(self):
         super().__init__()
+        self.disassembler = EARdisassembler()
 
     def get_instruction_info(self,data,addr):
-        return InstructionInfo(1)
+        size, _ = self.disassembler.disasm(data,addr)
+        return InstructionInfo(size)
     
     def get_instruction_text(self, data, addr):
-        return InstructionTextToken(InstructionTextTokenType.TextToken,"HI"),1
+        size, tokens = self.disassembler.disasm(data,addr)
+        return tokens,size
