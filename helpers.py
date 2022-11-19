@@ -50,11 +50,13 @@ class lestring_renderer(DataRenderer):
     def __init__(self):
         DataRenderer.__init__(self)
     def perform_is_valid_for_data(self, ctxt, view, addr, type, context):
-        res = DataRenderer.is_type_of_struct_name(type,"lestring",context)
-        print("YTES??",res)
-        return DataRenderer.is_type_of_struct_name(type,"lestring",context)
+        return "lestring" in str(type)
 
     def perform_get_lines_for_data(self, ctxt, view, addr, type, prefix, width, context):
-        prefix.append(InstructionTextToken(InstructionTextTokenType.TextToken,"hi"))
+        if addr in view.session_data['strings'].keys():
+            string = view.session_data['strings'][addr]
+            prefix.append(InstructionTextToken(InstructionTextTokenType.StringToken,"\""))
+            prefix.append(InstructionTextToken(InstructionTextTokenType.StringToken,string))
+            prefix.append(InstructionTextToken(InstructionTextTokenType.StringToken,"\""))
         print("DID I HIT")
         return [DisassemblyTextLine(prefix, addr)]        

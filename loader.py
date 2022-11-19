@@ -3,12 +3,17 @@ from binaryninja import (
     BinaryView, 
     BinaryReader,
     Architecture,
-    Type
+    Type,
+    IntegerType,
+    StructureBuilder,
+    Symbol,
 )
 from binaryninja.enums import(
     SegmentFlag,
-    SectionSemantics
+    SectionSemantics,
+    SymbolType
 )
+
 from .helpers import (
     PEG_TYPE, 
     get_lestring, 
@@ -50,27 +55,25 @@ class PEGASUS(BinaryView):
         lestring_t , lestring_name = self.parse_type_string(lestring_def)
         self.define_type(Type.generate_auto_type_id("pegasus",str(lestring_name)),lestring_name,lestring_t)
 
+        # global string tracking
+        self.session_data['strings'] = {}
 
         magic = self.br.read(8)
         arch = self.br.read32()
         cmd_count = self.br.read16()
-        print("CMD_COUNT",cmd_count)
         #do pegasus cmd
         for _ in range(cmd_count):
             data_start = self.br.offset
             cmd_type = self.br.read16()
             cmd_size = self.br.read16()
-            print("st",hex(data_start))
             sz = cmd_size-4
             cmd_data = self.br.read(sz)
             self.br.seek_relative(-sz)
-            print("CMD_TYPE", cmd_type)
             if PEG_TYPE(cmd_type) == PEG_TYPE.PEG_SEGMENT:
                 name = get_lestring(cmd_data)
-                print(name)
+                self.session_data['strings'][self.br.offset] = name
                 self.br.read(len(name))
                 mem_vppn = self.br.read8()
-                print(mem_vppn)
                 mem_start = mem_vppn*0x100
                 mem_vpage_count = self.br.read8()
                 mem_length = mem_vpage_count*0x100
@@ -91,13 +94,6 @@ class PEGASUS(BinaryView):
                     #i guess we know where header ends
                     self.add_auto_segment(0,mem_foff,0,mem_foff,SegmentFlag.SegmentReadable)
                     self.add_auto_section("@HEAD",0,mem_foff,SectionSemantics.ReadOnlyDataSectionSemantics)
-                print("ADDING SEG")
-                print("start",hex(mem_start))
-                print("len",hex(mem_length))
-                print("mem_off",hex(mem_foff))
-                print("mem lenb",hex(mem_fsize))
-                print("arch",self.arch)
-                print("plat",self.platform)
                 self.add_auto_segment(mem_start,mem_length,mem_foff,mem_fsize,perms)
                 self.add_auto_section(name,mem_start,mem_length,sem)
                 struct = f"""
@@ -116,34 +112,51 @@ class PEGASUS(BinaryView):
                 self.define_type(Type.generate_auto_type_id("pegasus",str(data_name)),data_name,data_t)
                 self.define_data_var(data_start,data_t)
             elif PEG_TYPE(cmd_type) == PEG_TYPE.PEG_ENTRY:
+                entry_start = self.br.offset-4
+                entry_struct = StructureBuilder.create()
+                entry_struct.packed = True
+                entry_struct.append(cmd_enum_t,"cmd_type")
+                entry_struct.append(IntegerType.create(2),"cmd_size")
                 regs = ['rv','r3','r4','r5','r6','r7','pc','dpc']
                 self.init_vals = {}
                 for reg in regs:
                     self.init_vals[reg] = self.br.read16()
-                self.entry_point = self.init_vals['pc']
-                self.add_entry_point(self.entry_point)
-                self.add_function(self.entry_point)
+                    entry_struct.append(IntegerType.create(2,False),reg)
+                self.entry = self.init_vals['pc']
+                self.add_entry_point(self.entry)
+                self.add_function(self.entry)
+                self.define_data_var(entry_start,entry_struct)
             elif PEG_TYPE(cmd_type) == PEG_TYPE.PEG_SYMTAB:
+                sym_start = self.br.offset-4
+                sym_table_struct = StructureBuilder.create()
+                sym_table_struct.packed = True
+                sym_table_struct.append(cmd_enum_t,"cmd_type")
+                sym_table_struct.append(IntegerType.create(2),"cmd_size")
+                sym_table_struct.append(IntegerType.create(2),"sym_count")
                 sym_count = self.br.read16()
+                cmd_data = cmd_data[2:]
                 for _ in range(sym_count):
-                    sym_start = self.br.offset
                     name = get_lestring(cmd_data)
-                    print(name)
+                    self.session_data['strings'][self.br.offset] = name
                     self.br.read(len(name))
                     val = self.br.read16()
+                    self.add_function(val)
+                    f_sym = Symbol(SymbolType.FunctionSymbol,val,name)
+                    self.define_auto_symbol(f_sym)
                     sym_struct = f"""
-                        struct {{
+                        struct __packed {{
                             lestring name[{len(name)}];
                             uint16_t val;
                         }};
                     """
                     sym_t, sym_name = self.parse_type_string(sym_struct)
                     self.define_type(Type.generate_auto_type_id("pegasus",str(sym_name)),sym_name,sym_t)
-                    self.define_data_var(sym_start,sym_t)
-                return True
+                    sym_table_struct.append(sym_t)
+                    cmd_data = cmd_data[len(name)+2:]
+                self.define_data_var(sym_start,sym_table_struct)
             elif PEG_TYPE(cmd_type) == PEG_TYPE.PEG_RELTAB:
                 reloc_count = self.br.read16()
-
+                #TODO
         self.entry_addr = 0
         
 
