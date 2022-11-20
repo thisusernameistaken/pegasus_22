@@ -1,3 +1,4 @@
+from selectors import EpollSelector
 from binaryninja import (
     InstructionTextToken,
     InstructionTextTokenType,
@@ -30,8 +31,12 @@ class EARdisassembler:
             0x14:self._bra,
             0x15:self._brr,
             0x17:self._fcr,
+            0x18:self._rdb,
             0x19:self._wrb,
             0x1c:self._inc,
+            0x1d:self._bpt,
+            0x1e:self._hlt,
+            0x1f:self._nop
         }
         self.instr_prefix = {
             0xc0:_xc,
@@ -40,7 +45,7 @@ class EARdisassembler:
             0xd0:self._dr,
         }
     
-        self.cond_val = ["EQ ","NE ","GT ","LE ","LT ","GE ","SP "," ","NG ","PS ","BG ","SE ","SM ","BE ","OD ","EV "]
+        self.cond_val = ["EQ ","NE ","GT ","LE ","LT ","GE ","SP ","A ","NG ","PS ","BG ","SE ","SM ","BE ","OD ","EV "]
 
     def decode_cond(self,data):
         cond = data >> 5
@@ -48,11 +53,13 @@ class EARdisassembler:
         return cond, opcode
 
     def get_cond_tokens(self,cond):
-        tokens = []
-        if cond != 7:
-            tokens = [InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,".")]
+        tokens = [InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,".")]
         tokens.append(InstructionTextToken(InstructionTextTokenType.KeywordToken,self.cond_val[cond]))
-        return tokens   
+        if cond != 7:
+            cond = True
+        else:
+            cond = False
+        return tokens, cond
     
     def disasm(self,data,addr,prefix=None):
         if prefix is None and data[0] in self.instr_prefix.keys():
@@ -62,11 +69,13 @@ class EARdisassembler:
 
         cond,opcode = self.decode_cond(data[0])
 
-        cond_tokens = self.get_cond_tokens(cond)
+        cond_tokens,more_cond = self.get_cond_tokens(cond)
 
         if opcode in self.opcodes.keys():
             size,tokens, branch_info = self.opcodes[opcode](data,addr)
             tokens[1:1] = cond_tokens
+            if more_cond and len(branch_info)>0:
+                branch_info.append((BranchType.FalseBranch,addr+size))
             return size,tokens,branch_info
          
         return self.default_bad()
@@ -90,10 +99,14 @@ class EARdisassembler:
         dr_tokens = [InstructionTextToken(InstructionTextTokenType.RegisterToken,dest_reg)]
         dr_tokens.append(InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,", "))
         size, _tokens, cond = self.disasm(data[1:],addr+1,prefix=1)
-        _tokens[4:4]=dr_tokens
+        _tokens[3:3]=dr_tokens
         return size+1,_tokens, cond
 
     # INSTRUCTIONS
+    def _single(self,data,addr,name):
+        tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,name)]
+        return 1,tokens,[]
+
     def _standard(self,data,addr,name):
         tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,name)]
         reg_pair = data[1]
@@ -194,13 +207,14 @@ class EARdisassembler:
         if vy is None:
             source_reg = f"R{ry}"
             tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,source_reg))
-            # cond = [(BranchType.IndirectBranch,None)]
-            cond = []
+            true_branch = (BranchType.IndirectBranch,None)
+            # false_branch = (BranchType.FalseBranch,addr+length)
+            cond = [true_branch]
         else:
             tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,hex(vy),vy))
             true_branch = (BranchType.TrueBranch,vy)
-            false_branch = (BranchType.FalseBranch,addr+length)
-            cond = [true_branch,false_branch]
+            # false_branch = (BranchType.FalseBranch,addr+length)
+            cond = [true_branch]
         return length, tokens, cond
 
     def _brr(self,data,addr):
@@ -210,8 +224,8 @@ class EARdisassembler:
         length += 2
         tokens.append(InstructionTextToken(InstructionTextTokenType.CodeRelativeAddressToken,hex(addr+vy+length),addr+vy+length))
         true_branch = (BranchType.TrueBranch,addr+vy+length)
-        false_branch = (BranchType.FalseBranch,addr+length)
-        cond = [true_branch,false_branch]
+        # false_branch = (BranchType.FalseBranch,addr+length)
+        cond = [true_branch]
         return length, tokens, cond
 
     def _fcr(self,data,addr):
@@ -223,6 +237,21 @@ class EARdisassembler:
         length = 3
         branch = BranchType.CallDestination
         return length, tokens, [(branch,dest)]
+
+    def _rdb(self,data,addr):
+        tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"RDB")]
+        reg_pair = data[1]
+        length = 2
+        rx = reg_pair>>4
+        ry = reg_pair & 0xf
+        val = ctypes.c_int8(ry).value
+        dest_reg = f"R{rx}"
+        tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,dest_reg))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,", "))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.BeginMemoryOperandToken,"("))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,str(val),val))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.EndMemoryOperandToken,")"))
+        return length, tokens, []
 
     def _wrb(self,data,addr):
         tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"WRB")]
@@ -259,3 +288,14 @@ class EARdisassembler:
         tokens.append(InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,", "))
         tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,str(val),val))
         return length, tokens, []
+
+    def _bpt(self,data,addr):
+        return self._single(data,addr,"BPT")
+    
+    def _hlt(self,data,addr):
+        length,tokens,_= self._single(data,addr,"HLT")
+        cond = [(BranchType.FunctionReturn,None)]
+        return length, tokens, cond
+
+    def _nop(self,data,addr):
+        return self._single(data,addr,"NOP")

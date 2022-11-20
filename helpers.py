@@ -53,8 +53,8 @@ class lestring_renderer(DataRenderer):
         return "lestring" in str(type)
 
     def perform_get_lines_for_data(self, ctxt, view, addr, type, prefix, width, context):
-        if addr in view.session_data['strings'].keys():
-            string = view.session_data['strings'][addr]
+        if addr-0x1000 in view.session_data['strings'].keys():
+            string = view.session_data['strings'][addr-0x1000]
             prefix.append(InstructionTextToken(InstructionTextTokenType.StringToken,"\""))
             prefix.append(InstructionTextToken(InstructionTextTokenType.StringToken,string))
             prefix.append(InstructionTextToken(InstructionTextTokenType.StringToken,"\""))

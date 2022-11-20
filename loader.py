@@ -47,7 +47,7 @@ class PEGASUS(BinaryView):
         # define header struct and enums
         header_t , header_name = self.parse_type_string(peg_header_struct)
         self.define_type(Type.generate_auto_type_id("pegasus",str(header_name)),header_name,header_t)
-        self.define_data_var(0,header_t,str(header_name))
+        self.define_data_var(0x1000,header_t,str(header_name))
         
         cmd_enum_t , cmd_enum = self.parse_type_string(peg_type_struct)
         self.define_type(Type.generate_auto_type_id("pegasus",str(cmd_enum)),cmd_enum,cmd_enum_t)
@@ -92,8 +92,8 @@ class PEGASUS(BinaryView):
                     perms |= SegmentFlag.SegmentContainsCode
                     sem = SectionSemantics.ReadOnlyCodeSectionSemantics
                     #i guess we know where header ends
-                    self.add_auto_segment(0,mem_foff,0,mem_foff,SegmentFlag.SegmentReadable)
-                    self.add_auto_section("@HEAD",0,mem_foff,SectionSemantics.ReadOnlyDataSectionSemantics)
+                    self.add_auto_segment(0x1000,mem_foff,0,mem_foff,SegmentFlag.SegmentReadable)
+                    self.add_auto_section("@HEAD",0x1000,mem_foff,SectionSemantics.ReadOnlyDataSectionSemantics)
                 self.add_auto_segment(mem_start,mem_length,mem_foff,mem_fsize,perms)
                 self.add_auto_section(name,mem_start,mem_length,sem)
                 struct = f"""
@@ -110,7 +110,7 @@ class PEGASUS(BinaryView):
                 """
                 data_t, data_name = self.parse_type_string(struct)
                 self.define_type(Type.generate_auto_type_id("pegasus",str(data_name)),data_name,data_t)
-                self.define_data_var(data_start,data_t)
+                self.define_data_var(data_start+0x1000,data_t)
             elif PEG_TYPE(cmd_type) == PEG_TYPE.PEG_ENTRY:
                 entry_start = self.br.offset-4
                 entry_struct = StructureBuilder.create()
@@ -122,10 +122,10 @@ class PEGASUS(BinaryView):
                 for reg in regs:
                     self.init_vals[reg] = self.br.read16()
                     entry_struct.append(IntegerType.create(2,False),reg)
-                self.entry = self.init_vals['pc']
+                self.entry = self.init_vals['pc']+4
                 self.add_entry_point(self.entry)
                 self.add_function(self.entry)
-                self.define_data_var(entry_start,entry_struct)
+                self.define_data_var(entry_start+0x1000,entry_struct)
             elif PEG_TYPE(cmd_type) == PEG_TYPE.PEG_SYMTAB:
                 sym_start = self.br.offset-4
                 sym_table_struct = StructureBuilder.create()
@@ -153,7 +153,7 @@ class PEGASUS(BinaryView):
                     self.define_type(Type.generate_auto_type_id("pegasus",str(sym_name)),sym_name,sym_t)
                     sym_table_struct.append(sym_t)
                     cmd_data = cmd_data[len(name)+2:]
-                self.define_data_var(sym_start,sym_table_struct)
+                self.define_data_var(sym_start+0x1000,sym_table_struct)
             elif PEG_TYPE(cmd_type) == PEG_TYPE.PEG_RELTAB:
                 reloc_count = self.br.read16()
                 #TODO
