@@ -1,8 +1,10 @@
 from binaryninja import (
     InstructionTextToken,
-    InstructionTextTokenType
+    InstructionTextTokenType,
+    BranchType
 )
 import struct
+import ctypes
 
 class EARdisassembler:
 
@@ -24,7 +26,12 @@ class EARdisassembler:
             0xb:self._srs,
             0xc:self._mov,
             0xd:self._cmp,
-            0x17:self._fcr
+            0x12:self._ldb,
+            0x14:self._bra,
+            0x15:self._brr,
+            0x17:self._fcr,
+            0x19:self._wrb,
+            0x1c:self._inc,
         }
         self.instr_prefix = {
             0xc0:_xc,
@@ -33,6 +40,7 @@ class EARdisassembler:
             0xd0:self._dr,
         }
     
+        self.cond_val = ["EQ ","NE ","GT ","LE ","LT ","GE ","SP "," ","NG ","PS ","BG ","SE ","SM ","BE ","OD ","EV "]
 
     def decode_cond(self,data):
         cond = data >> 5
@@ -41,8 +49,9 @@ class EARdisassembler:
 
     def get_cond_tokens(self,cond):
         tokens = []
-        if cond == 7:
-            tokens.append(InstructionTextToken(InstructionTextTokenType.KeywordToken,"ALWAYS "))
+        if cond != 7:
+            tokens = [InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,".")]
+        tokens.append(InstructionTextToken(InstructionTextTokenType.KeywordToken,self.cond_val[cond]))
         return tokens   
     
     def disasm(self,data,addr,prefix=None):
@@ -56,24 +65,23 @@ class EARdisassembler:
         cond_tokens = self.get_cond_tokens(cond)
 
         if opcode in self.opcodes.keys():
-            size,tokens = self.opcodes[opcode](data,addr)
-            cond_tokens.extend(tokens)
-            tokens = cond_tokens
-            return size,tokens
+            size,tokens, branch_info = self.opcodes[opcode](data,addr)
+            tokens[1:1] = cond_tokens
+            return size,tokens,branch_info
          
         return self.default_bad()
 
     def default_prefix(self,data,addr):
         tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"UNIMPL PREFIX")]
-        size, _tokens = self.disasm(data[1:],addr+1,prefix=1)
+        size, _tokens, cond = self.disasm(data[1:],addr+1,prefix=1)
         tokens.extend(_tokens)
-        return size+1,tokens
+        return size+1,tokens, cond
 
     def default_bad(self):
-        return 2,[InstructionTextToken(InstructionTextTokenType.TextToken,"BAD")]
+        return 2,[InstructionTextToken(InstructionTextTokenType.TextToken,"BAD")], []
     
     def default(self,data,addr):
-        return 2,[InstructionTextToken(InstructionTextTokenType.TextToken,"UNIMPL")]
+        return 2,[InstructionTextToken(InstructionTextTokenType.TextToken,"UNIMPL")], []
 
     #PREFIXES
     def _dr(self,data,addr):
@@ -81,9 +89,9 @@ class EARdisassembler:
         dest_reg = f"R{dest_reg_val}"
         dr_tokens = [InstructionTextToken(InstructionTextTokenType.RegisterToken,dest_reg)]
         dr_tokens.append(InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,", "))
-        size, _tokens = self.disasm(data[1:],addr+1,prefix=1)
-        _tokens[2:2]=dr_tokens
-        return size+1,_tokens
+        size, _tokens, cond = self.disasm(data[1:],addr+1,prefix=1)
+        _tokens[4:4]=dr_tokens
+        return size+1,_tokens, cond
 
     # INSTRUCTIONS
     def _standard(self,data,addr,name):
@@ -94,7 +102,7 @@ class EARdisassembler:
         ry = reg_pair & 0xf
         vy = None
         if ry == 15:
-            vy = struct.unpack("<H",data[2:4])[0]
+            vy = struct.unpack("<h",data[2:4])[0]
             length += 2
         dest_reg = f"R{rx}"
         tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,dest_reg))
@@ -104,54 +112,150 @@ class EARdisassembler:
             tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,source_reg))
         else:
             tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,hex(vy),vy))
-        return length, tokens
+        return length, tokens, []
     
     def _add(self,data,addr):
-        return self._standard(data,addr,"ADD ")
+        return self._standard(data,addr,"ADD")
 
     def _sub(self,data,addr):
-        return self._standard(data,addr,"SUB ")
+        return self._standard(data,addr,"SUB")
     
     def _mlu(self,data,addr):
-        return self._standard(data,addr,"MLU ")
+        return self._standard(data,addr,"MLU")
 
     def _mls(self,data,addr):
-        return self._standard(data,addr,"MLS ")
+        return self._standard(data,addr,"MLS")
 
     def _dvu(self,data,addr):
-        return self._standard(data,addr,"DVU ")
+        return self._standard(data,addr,"DVU")
 
     def _dvs(self,data,addr):
-        return self._standard(data,addr,"DVS ")
+        return self._standard(data,addr,"DVS")
 
     def _xor(self,data,addr):
-        return self._standard(data,addr,"xor ")
+        return self._standard(data,addr,"XOR")
 
     def _and(self,data,addr):
-        return self._standard(data,addr,"AND ")
+        return self._standard(data,addr,"AND")
     
     def _or(self,data,addr):
-        return self._standard(data,addr,"ORR ")
+        return self._standard(data,addr,"ORR")
 
     def _shl(self,data,addr):
-        return self._standard(data,addr,"SHL ")
+        return self._standard(data,addr,"SHL")
 
     def _sru(self,data,addr):
-        return self._standard(data,addr,"SHR ")
+        return self._standard(data,addr,"SHR")
 
     def _srs(self,data,addr):
-        return self._standard(data,addr,"SRS ")
+        return self._standard(data,addr,"SRS")
 
     def _mov(self,data,addr):
-       return self._standard(data,addr,"MOV ")
+       return self._standard(data,addr,"MOV")
 
     def _cmp(self,data,addr):
-       return self._standard(data,addr,"CMP ")
+       return self._standard(data,addr,"CMP")
+
+    def _ldb(self,data,addr):
+        tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"LDB")]
+        reg_pair = data[1]
+        length = 2
+        rx = reg_pair >> 4
+        ry = reg_pair & 0xf
+        vy = None
+        if ry == 15:
+            vy = struct.unpack("<h",data[2:4])[0]
+            length += 2
+        dest_reg = f"R{rx}"
+        tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,dest_reg))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,", "))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.BeginMemoryOperandToken,"["))
+        if vy is None:
+            source_reg = f"R{ry}"
+            tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,source_reg))
+        else:
+            tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,hex(vy),vy))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.EndMemoryOperandToken,"]"))
+        return length, tokens, []
+
+    def _bra(self,data,addr):
+        tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"BRA")]
+        reg_pair = data[1]
+        length = 2
+        rx = reg_pair >> 4
+        ry = reg_pair & 0xf
+        vy = None
+        if ry == 15:
+            vy = struct.unpack("<h",data[2:4])[0]
+            length += 2
+        dest_reg = f"R{rx}"
+        tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,dest_reg))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,", "))
+        if vy is None:
+            source_reg = f"R{ry}"
+            tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,source_reg))
+            # cond = [(BranchType.IndirectBranch,None)]
+            cond = []
+        else:
+            tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,hex(vy),vy))
+            true_branch = (BranchType.TrueBranch,vy)
+            false_branch = (BranchType.FalseBranch,addr+length)
+            cond = [true_branch,false_branch]
+        return length, tokens, cond
+
+    def _brr(self,data,addr):
+        tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"BRR")]
+        length = 1
+        vy = struct.unpack("<h",data[1:3])[0]
+        length += 2
+        tokens.append(InstructionTextToken(InstructionTextTokenType.CodeRelativeAddressToken,hex(addr+vy+length),addr+vy+length))
+        true_branch = (BranchType.TrueBranch,addr+vy+length)
+        false_branch = (BranchType.FalseBranch,addr+length)
+        cond = [true_branch,false_branch]
+        return length, tokens, cond
 
     def _fcr(self,data,addr):
-        tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"FCR ")]
+        tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"FCR")]
         data = data[1:]
-        vy = struct.unpack("<H",data[:2])[0]
-        tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,hex(vy),vy))
+        val = struct.unpack("<h",data[:2])[0]
+        dest = addr+3+val
+        tokens.append(InstructionTextToken(InstructionTextTokenType.CodeRelativeAddressToken,hex(dest),dest))
         length = 3
-        return length, tokens
+        branch = BranchType.CallDestination
+        return length, tokens, [(branch,dest)]
+
+    def _wrb(self,data,addr):
+        tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"WRB")]
+        reg_pair = data[1]
+        length = 2
+        val = reg_pair>>4
+        ry = reg_pair & 0xf
+        vy = None
+        if ry == 15:
+            vy = data[2]
+            length += 1
+        tokens.append(InstructionTextToken(InstructionTextTokenType.BeginMemoryOperandToken,"("))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,str(val),val))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.EndMemoryOperandToken,")"))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,", "))
+        if vy is None:
+            source_reg = f"R{ry}"
+            tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,source_reg))
+        else:
+            tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,hex(vy),vy))
+        return length,tokens,[]
+
+    def _inc(self,data,addr):
+        tokens = [InstructionTextToken(InstructionTextTokenType.TextToken,"INC")]
+        reg_pair = data[1]
+        length = 2
+        rx = reg_pair >> 4
+        ry = reg_pair & 0xf
+        val = ctypes.c_int8(ry).value
+        if val >=0:
+            val +=1
+        dest_reg = f"R{rx}"
+        tokens.append(InstructionTextToken(InstructionTextTokenType.RegisterToken,dest_reg))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken,", "))
+        tokens.append(InstructionTextToken(InstructionTextTokenType.IntegerToken,str(val),val))
+        return length, tokens, []

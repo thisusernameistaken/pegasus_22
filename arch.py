@@ -55,9 +55,16 @@ class EAR(Architecture):
         self.disassembler = EARdisassembler()
 
     def get_instruction_info(self,data,addr):
-        size, _ = self.disassembler.disasm(data,addr)
-        return InstructionInfo(size)
+        result = InstructionInfo()
+        size, _, cond = self.disassembler.disasm(data,addr)
+        result.length = size
+        for c in cond:
+            if c[1] is not None:
+                result.add_branch(c[0],c[1])
+            else:
+                result.add_branch(c[0])
+        return result
     
     def get_instruction_text(self, data, addr):
-        size, tokens = self.disassembler.disasm(data,addr)
+        size, tokens, cond = self.disassembler.disasm(data,addr)
         return tokens,size
