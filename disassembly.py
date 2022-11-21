@@ -4,14 +4,16 @@ from binaryninja import (
     InstructionTextTokenType,
     BranchType
 )
+# from binaryninjaui import UIContext
 import struct
 import ctypes
 
 class EARdisassembler:
 
-    def __init__(self):
+    def __init__(self,skip):
         _xc=_tf=_em = self.default_prefix
-
+        self.SKIP_VAL = skip
+        self.bv = None
         self.opcodes = {
             0:self._add,
             1:self._sub,
@@ -62,21 +64,21 @@ class EARdisassembler:
         return tokens, cond
     
     def disasm(self,data,addr,prefix=None):
-        if prefix is None and data[0] in self.instr_prefix.keys():
-            return self.instr_prefix[data[0]](data,addr)
-        elif prefix is None  and(data[0] >> 4) == 0xd:
-            return self.instr_prefix[0xd0](data,addr)
+        # if prefix is None and data[0] in self.instr_prefix.keys():
+        #     return self.instr_prefix[data[0]](data,addr)
+        # elif prefix is None  and(data[0] >> 4) == 0xd:
+        #     return self.instr_prefix[0xd0](data,addr)
 
-        cond,opcode = self.decode_cond(data[0])
+        # cond,opcode = self.decode_cond(data[0])
 
-        cond_tokens,more_cond = self.get_cond_tokens(cond)
+        # cond_tokens,more_cond = self.get_cond_tokens(cond)
 
-        if opcode in self.opcodes.keys():
-            size,tokens, branch_info = self.opcodes[opcode](data,addr)
-            tokens[1:1] = cond_tokens
-            if more_cond and len(branch_info)>0:
-                branch_info.append((BranchType.FalseBranch,addr+size))
-            return size,tokens,branch_info
+        # if opcode in self.opcodes.keys():
+        #     size,tokens, branch_info = self.opcodes[opcode](data,addr)
+        #     tokens[1:1] = cond_tokens
+        #     if more_cond and len(branch_info)>0:
+        #         branch_info.append((BranchType.FalseBranch,addr+(size*self.SKIP_VAL)))
+        #     return size,tokens,branch_info
          
         return self.default_bad()
 
@@ -115,6 +117,7 @@ class EARdisassembler:
         ry = reg_pair & 0xf
         vy = None
         if ry == 15:
+            # print("heers data",data)
             vy = struct.unpack("<h",data[2:4])[0]
             length += 2
         dest_reg = f"R{rx}"
@@ -222,8 +225,8 @@ class EARdisassembler:
         length = 1
         vy = struct.unpack("<h",data[1:3])[0]
         length += 2
-        tokens.append(InstructionTextToken(InstructionTextTokenType.CodeRelativeAddressToken,hex(addr+vy+length),addr+vy+length))
-        true_branch = (BranchType.TrueBranch,addr+vy+length)
+        tokens.append(InstructionTextToken(InstructionTextTokenType.CodeRelativeAddressToken,hex(addr+vy+(length*self.SKIP_VAL)),addr+vy+(length*self.SKIP_VAL)))
+        true_branch = (BranchType.TrueBranch,addr+vy+(length*self.SKIP_VAL))
         # false_branch = (BranchType.FalseBranch,addr+length)
         cond = [true_branch]
         return length, tokens, cond
@@ -299,3 +302,15 @@ class EARdisassembler:
 
     def _nop(self,data,addr):
         return self._single(data,addr,"NOP")
+
+    # def update_bv(self):
+    #     if self.bv == None:
+    #         ac = UIContext.activeContext()
+    #         cv=ac.getCurrentViewFrame()
+    #         if cv != None:
+    #             self.bv = cv.getCurrentBinaryView()
+    #             if self.bv != None:
+    #                 return True
+    #             return False
+    #         return False
+    #     return True
