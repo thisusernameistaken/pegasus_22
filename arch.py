@@ -16,7 +16,7 @@ class EAR(Architecture):
 
     default_int_size = 2
     address_size = 2
-    max_instr_length = 0x31*5
+    max_instr_length = 6
 
     endianness = Endianness.LittleEndian
     stack_pointer = "SP"
@@ -55,7 +55,6 @@ class EAR(Architecture):
         self.disassembler = EARdisassembler()
 
     def get_instruction_info(self,data,addr):
-        data = data[::0x31]
         result = InstructionInfo()
         size, _, cond = self.disassembler.disasm(data,addr)
         result.length = size
@@ -67,9 +66,8 @@ class EAR(Architecture):
         return result
     
     def get_instruction_text(self, data, addr):
-        data = data[::0x31]
         size, tokens, cond = self.disassembler.disasm(data,addr)
-        return tokens,size*0x31
+        return tokens,size
 
     def get_instruction_low_level_il(self,data,addr,il):
         return il.unimplemented()
